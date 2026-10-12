@@ -10,13 +10,6 @@
 > [`docs/设计规格.md`](docs/设计规格.md)，落地清单见
 > [`docs/骨架落地清单.md`](docs/骨架落地清单.md)。
 
-> [!WARNING]
-> **本规格尚未按题库侧的 `_SCALE.md` 复核规模。** 现有 stage 的改动面普遍只有 1~2 个文件、
-> canonical 只有 3~4 条，低于现行下限（改动面 **≥3 文件**、canonical **≥5 条**且红 ≥2 条不同不变量、
-> 含边界/拒绝路径）。**开工前必须先复核并扩编**（同 stage 扩面，或与相邻 stage 合并），
-> 并把结果写回规格与 ticket 卡。参考已复核的两份：`mq-lab`（6 stage 全部扩面）
-> 与 `concurrency-lab`（Stage 1 / Stage 2）。
-
 
 ## 这是什么
 
@@ -26,23 +19,23 @@
 |---|---|
 | track.id | `microservice-bagu` |
 | 语言栈 | Java 17 + Maven（多模块）+ Spring Boot 3.2.5 + JUnit 5 / Surefire `-Dgroups=stageNN` |
-| 基础设施 | **默认档：零外部容器**（只跑 JVM）。常用档：`mysql:8.0@13306` + `redis:7@16379`（复用 `seckill-lab` 的端口约定）。演示档：`nacos/nacos-server:v2.x`（选修，不进判据） |
+| 基础设施 | **默认档：零外部容器**（只跑 JVM，一个进程内三个 Spring Boot 上下文：gateway + order + stock）。常用档：`mysql:8.0@13306` + `redis:7@16379`（复用 `seckill-lab` 的端口约定）。演示档：`nacos/nacos-server:v2.x`（选修，不进判据） |
 | stage 数 | **5 个**（Stage 1–4 为判据主干，Stage 5 为**选修**；另有 1 个 board-only 的 `stage-00-onboarding` 只上看板） |
-| 每 stage 规模 | （见规格） |
+| 每 stage 规模 | 按 [`_SCALE.md`](./_SCALE.md) 的下限复核后（本轮「**v1.1 规模复核**」，见 §1）：5 个 stage **全部「同 stage 扩面」、零合并**，改动面合计 **20 → 29 个文件位置**（v1 的 20 处 + **9 处新增**：`InstanceHealthGuard`、`RetryBudget`、`CallEnvelope`、`IdentityQuotaRegistry`、`LimiterMetricsGuard`、`TraceLogContext`、`SnowflakeLayout`、`IdCollisionRetry`、`IdempotencyRegistry`）。canonical **17 → 28 条**（红 **10** · 单线程/正常路径基线 13 · 边界/拒绝 5），被破坏的不变量 **每 stage 各 2 个**（= 每 stage 的红用例数，合计 10 个）；考点族每 stage ≥ 2 |
 | 依赖前置 | `java: "17"` / `build: maven` / `docker: "24"`（仅常用档与演示档需要）/ `memory_gb: "4"`（见 §6.4） |
 | 与 database-bagu 的关系 | 无重叠。`seckill-lab` 覆盖的是「单个进程 + 一个数据库」的深水区（索引/事务/锁/MVCC/缓存/死锁）；本 Track 的对象是**进程之间**（实例列表、超时、熔断、限流、traceId），两边唯一的共同词汇是「幂等」 |
-| 预计落地工作量 | 骨架 6 人日 / canonical 测试 5 人日 / 题面与判据 2 人日 / 分支与 pin 1 人日 ≈ **14 人日** |
+| 预计落地工作量 | 骨架 9 人日 / canonical 测试 8.5 人日 / 题面与判据 3 人日 / 分支与 pin 1.5 人日 ≈ **22 人日**（旧口径 14 人日是「每 stage 一个方法 / 两三条用例」的估算，已按 §7 的 v1.1 重新估算块上修；**内存预算没变，规模靠加文件**） |
 
 ## stage 一览
 
 | stage | 分支名 | 依赖 | canonical 测试路径 |
 |---|---|---|---|
 | 0（board-only，不出 ticket） | `—` | — | src/test/java/com/devteam/micro/SmokeTest.java |
-| 1 | `stage-01-discovery-and-loadbalance` | `[]`（**DAG 根**） | src/test/java/com/devteam/micro/stage01/LoadBalancerRoundRobinAcceptanceTest.java`、`…/stage01/LoadBalancerFailoverAcceptanceTest.java |
-| 2 | `stage-02-circuit-breaker-and-timeout` | `[micro-stage-01]` | src/test/java/com/devteam/micro/stage02/CircuitBreakerAcceptanceTest.java`、`…/stage02/DegradationAcceptanceTest.java |
-| 3 | `stage-03-rate-limit-and-overload` | `[micro-stage-01]` | src/test/java/com/devteam/micro/stage03/RateLimitAcceptanceTest.java`、`…/stage03/OverloadIsolationAcceptanceTest.java |
+| 1 | `stage-01-discovery-and-loadbalance` | `[]`（**DAG 根**） | src/test/java/com/devteam/micro/stage01/LoadBalancerRoundRobinAcceptanceTest.java`、`…/stage01/LoadBalancerFailoverAcceptanceTest.java`、`…/stage01/InstanceListBoundaryAcceptanceTest.java |
+| 2 | `stage-02-circuit-breaker-and-timeout` | `[micro-stage-01]` | src/test/java/com/devteam/micro/stage02/CircuitBreakerAcceptanceTest.java`、`…/stage02/DegradationAcceptanceTest.java`、`…/stage02/RetryBoundAcceptanceTest.java |
+| 3 | `stage-03-rate-limit-and-overload` | `[micro-stage-01]` | src/test/java/com/devteam/micro/stage03/RateLimitAcceptanceTest.java`、`…/stage03/QuotaRecoveryAcceptanceTest.java`、`…/stage03/OverloadIsolationAcceptanceTest.java |
 | 4 | `stage-04-trace-and-log-correlation` | `[micro-stage-01]` | src/test/java/com/devteam/micro/stage04/TraceIdPropagationAcceptanceTest.java`、`…/stage04/LogCorrelationAcceptanceTest.java |
-| 5（选修） | `stage-05-distributed-id` | `[micro-stage-01]` | src/test/java/com/devteam/micro/stage05/DistributedIdAcceptanceTest.java |
+| 5（选修） | `stage-05-distributed-id` | `[micro-stage-01]` | src/test/java/com/devteam/micro/stage05/DistributedIdAcceptanceTest.java`、`…/stage05/IdCollisionAndIdempotencyAcceptanceTest.java |
 
 > 表里的**分支名就是 git 分支名**：平台的 Forge 在 provision 时用
 > `base_ref = origin/<分支名>`（起始代码）与 `head_ref = origin/<分支名>-sol`（参考解），
